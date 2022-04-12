@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PING PONG</title>
+    <link rel="stylesheet" href="./css/style.css">
+</head>
+
+<body>
+    <canvas id="canvas"></canvas>
+    <div style="position:absolute; left:0%;top:0%; width:100%; height: 10%; text-align: center;">
+        <button id="btn">Start a New Game</button>
+        <h2 id="command"></h2>
+    </div>
+    <script src="./js/cannon.js"></script>
+    <script src="./js/babylon.js"></script>
+    <script>
+        var btn = document.getElementById("btn");
+        var command = document.getElementById("command");
+        var canvas = document.getElementById("canvas");
+
+        var startRenderLoop = function (engine, canvas) {
+            engine.runRenderLoop(function () {
+                if (sceneToRender && sceneToRender.activeCamera) {
+                    sceneToRender.render();
+                }
+            });
+        }
+
+        //Scene
+        var engine = null;
+        var scene = null;
+        var sceneToRender = null;
+
+        //Game Variables
+        let gameActive = false;
+        let playerOneScore = 0;
+        let playerTwoScore = 0;
+        var playerOneMove = 0;
+        var playerTwoMove = 0;
+        let ballMoveX = 0;
+        let ballMoveZ = 0;
+        var ball, paddle1, paddle2, sideWall1, sideWall2;
+
+        var createDefaultEngine = function () { return new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true, disableWebGL2Support: false }); };
+        var transformForce = function (mesh, vec) {
+            var mymatrix = new BABYLON.Matrix();
+            mesh.rotationQuaternion.toRotationMatrix(mymatrix);
+            return BABYLON.Vector3.TransformNormal(vec, mymatrix);
+        };
+        const clamp = (num, a, b) => Math.max(Math.min(num, Math.max(a, b)), Math.min(a, b));
+
+        var createScene = function () {
+
+            //Creating  BASIC ELEMENTS FOR 3D Enivorment 
+            scene = new BABYLON.Scene(engine);
+            scene.clearColor = new BABYLON.Color3.FromHexString("#07182e");
+
+            //Camera Setup
+            var camera = new BABYLON.ArcRotateCamera("Camera", 0, Math.PI / 3.5,10, BABYLON.Vector3.Zero(), scene);
+            camera.lowerRadiusLimit = 4;
+            camera.upperRadiusLimit = 30;
+            //Uncommit for Camera Control
+            //camera.attachControl(canvas);
+            camera.setTarget(new BABYLON.Vector3(-1, 0, 0));
+
+            //Light Setup
+            var hemiLight = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(30, 40, 0), scene);
+            var light = new BABYLON.DirectionalLight("light", new BABYLON.Vector3(0, -0.5, -0.7), scene);
+            light.position = new BABYLON.Vector3(30, 40, 0);
+            light.intensity = 0.5;
+            var shadowGenerator = new BABYLON.ShadowGenerator(1024, light);
+
+            //Physics
+            var gravityVector = new BABYLON.Vector3(0, -10, 0);
+            var physicsPlugin = new BABYLON.CannonJSPlugin(true);
+            scene.enablePhysics(gravityVector, physicsPlugin);
+            scene.getPhysicsEngine().setTimeStep(1/60);
+            scene.getPhysicsEngine().setSubTimeStep(1);
+
+            //Creating Scene
+            //GROUND With Texture
+            var ground = BABYLON.MeshBuilder.CreateBox("ground", {
+                height: 0.1,
+                width: 7,
+                depth: 12
+            }, scene);
+            ground.material = new BABYLON.StandardMaterial("groundMat");
+            ground.material.diffuseTexture = new BABYLON.Texture("./images/board.jpg");
+            ground.position = new BABYLON.Vector3(0, 0, 0);
+            ground.receiveShadows = true;
+
+            //Wall Material
+            var wallMat = new BABYLON.StandardMaterial("WallMat");
+            wallMat.diffuseColor = new BABYLON.Color3(0.85, 0.85, 0.85);
+
+            //Walls
+            sideWall1 = BABYLON.MeshBuilder.CreateBox("sideWall1", {
+                width: 0.7,
+                height: 0.3,
+                depth: 11.30
+            }, scene);
+            sideWall1.position = new BABYLON.Vector3(-2.62, 0.2, 0);
+            sideWall1.material = wallMat;
+
+            sideWall2 = BABYLON.MeshBuilder.CreateBox("sideWall2", {
+                width: 0.7,
+                height: 0.3,
+                depth: 11.30
+            }, scene);
+            sideWall2.position = new BABYLON.Vector3(2.62, 0.2, 0);
+            sideWall2.material = wallMat;
+
+            //Paddles
+            paddle1 = new BABYLON.MeshBuilder.CreateCapsule("paddle1",{
+                height: 1,
+                radius: 0.2,
+                tessellation: 100,
+                subdivisions: 1
+            },scene);
+            paddle1.rotation = new BABYLON.Vector3(0,0,Math.PI/2);
+            paddle1.position = new BABYLON.Vector3(0, 0.25, 5);
+            paddle1.material = new BABYLON.StandardMaterial("paddle1Mat");
+            paddle1.material.diffuseColor = new BABYLON.Color3.FromHexString("#d12836");
+
+            paddle2 = new BABYLON.MeshBuilder.CreateCapsule("paddle2",{
+                height: 1,
+                radius: 0.2,
+                tessellation: 100,
+                subdivisions: 1
+            },scene);
+            paddle2.rotation = new BABYLON.Vector3(0,0,Math.PI/2);
+            paddle2.position = new BABYLON.Vector3(0, 0.25, -5);
+            paddle2.material = new BABYLON.StandardMaterial("paddle2Mat");
+            paddle2.material.diffuseColor = new BABYLON.Color3.FromHexString("#1f4eb5");
+
+            //Ball
+            ball = BABYLON.MeshBuilder.CreateSphere('ball', { diameter: 0.4 }, scene);
+            ball.material = new BABYLON.StandardMaterial("ballMat");
+            ball.material.diffuseColor = new BABYLON.Color3.FromHexString("#FFFF00");
+            ball.position = new BABYLON.Vector3(0, 0.25, 0);
+
+            //Shadow Setting
+            shadowGenerator.useBlurExponentialShadowMap = true;
+            shadowGenerator.blurScale = 1;
+            shadowGenerator.getShadowMap().renderList.push(paddle1);
+            shadowGenerator.getShadowMap().renderList.push(paddle2);
+            shadowGenerator.getShadowMap().renderList.push(ball);
+            shadowGenerator.getShadowMap().renderList.push(sideWall1);
+            shadowGenerator.getShadowMap().renderList.push(sideWall2);
+
+            //Phsysics Logic
+            ground.physicsImposter = new BABYLON.PhysicsImpostor(ground, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, restitution: 1 }, scene);
+            ground.physicsImposter.soft = true;
+            paddle1.physicsImposter = new BABYLON.PhysicsImpostor(paddle1, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, friction: 0.9 }, scene);
+            paddle1.physicsImposter.soft = true;
+            paddle2.physicsImposter = new BABYLON.PhysicsImpostor(paddle2, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, friction: 0.9 }, scene);
+            paddle2.physicsImposter.soft = true;
+            ball.physicsImposter = new BABYLON.PhysicsImpostor(ball, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 3, friction: 0.9 }, scene);
+            ball.physicsImposter.soft = true;
+
+            //Animation ON Paddles
+            var animationPaddle = new BABYLON.Animation("tutoAnimation", "scaling.y", 30, BABYLON.Animation.ANIMATIONTYPE_FLOAT, BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE);
+            var keys = [];
+            keys.push({
+                frame: 0,
+                value: 1
+            });
+            keys.push({
+                frame: 20,
+                value: 0.85
+            });
+            keys.push({
+                frame: 100,
+                value: 1
+            });
+            animationPaddle.setKeys(keys);
+            paddle1.animations.push(animationPaddle);
+            paddle2.animations.push(animationPaddle);
+            
+
+            //PLayer Controlling MOVING UP AND DOWN
+            window.addEventListener('keydown', function (e) {
+                if(gameActive){
+                    if(e.keyCode == 87){
+                        playerTwoMove = -1;
+                    }
+                    else if(e.keyCode == 83){
+                        playerTwoMove = 1
+                    }
+                    if(e.keyCode == 38){
+                        playerOneMove = -1;
+                    }
+                    else if(e.keyCode == 40){
+                        playerOneMove = 1;
+                    }
+                }
+            });
+            window.addEventListener('keyup', function (e) {
+                if(gameActive){
+                    if(e.keyCode == 87){
+                        playerTwoMove = 0;
+                    }
+                    else if(e.keyCode == 83){
+                        playerTwoMove = 0
+                    }
+                    if(e.keyCode == 38){
+                        playerOneMove = 0;
+                    }
+                    else if(e.keyCode == 40){
+                        playerOneMove = 0;
+                    }
+                }
+            });
+
+            //ADDING EVENT OF BUTTON TO Start A New Game
+            btn.addEventListener('click', event => {
+                if (!gameActive) {
+                    gameActive = true;
+                    playerOneScore = 0;
+                    playerTwoScore = 0;
+                    btn.textContent = "Game is Started";
+                    ballMoveZ = Math.floor(Math.random() * 2) == 0? 1:-1;
+                    scene.beginAnimation(paddle1, 0, 100, true);
+                    scene.beginAnimation(paddle2, 0, 100, true);
+                }
+            });
+            return scene;
+        };
+
+        //Runngin Game
+        window.initFunction = async function () {
+            var asyncEngineCreation = async function () {
+                try {
+                    return createDefaultEngine();
+                } catch (e) {
+                    console.log("the available createEngine function failed. Creating the default engine instead");
+                    return createDefaultEngine();
+                }
+            }
+            window.engine = await asyncEngineCreation();
+            if (!engine) throw 'engine should not be null.';
+            startRenderLoop(engine, canvas);
+            //CREATING SCENE
+            window.scene = createScene();
+        };
+
+
+        initFunction().then(() => {
+            engine.runRenderLoop(function () {
+                //Render LOOP
+                if(gameActive){
+                    //GOING OUT OF RANGE LEFT AND RIGHT
+                    if (ball.position.z > 6) {
+                        ball.position = new BABYLON.Vector3(0, 0.25, 0);
+                        ballMoveZ = -1;
+                        ballMoveX = 0;
+                        playerTwoScore++;
+
+                    }
+                    else if (ball.position.z < -6) {
+                        ball.position = new BABYLON.Vector3(0, 0.25, 0);
+                        ballMoveZ = 1;
+                        ballMoveX = 0;
+                        playerOneScore++;
+                    }
+                    //Colliding with PADDLES
+                    if (ball.intersectsMesh(paddle1)) {
+                        if(ball.position.z < paddle1.position.z){
+                            ballMoveZ = -1;
+                            var ballX = Math.round((ball.position.x + Number.EPSILON) * 100) / 100;
+                            var paddle1X = Math.round((paddle1.position.x + Number.EPSILON) * 100) / 100;
+                            if((paddle1X - ballX) < -0.05){
+                                ballMoveX = 1;
+                            }
+                            else if((paddle1X-ballX) > 0.05){
+                                ballMoveX = -1;
+                            }
+                            else{
+                                ballMoveX = 0;
+                            }
+                        }
+                    }
+                    else if (ball.intersectsMesh(paddle2)) {
+                        if(ball.position.z > paddle2.position.z){
+                            ballMoveZ = 1;
+                            var ballX = Math.round((ball.position.x + Number.EPSILON) * 100) / 100;
+                            var paddle2X = Math.round((paddle2.position.x + Number.EPSILON) * 100) / 100;
+                            if((paddle2X - ballX) < -0.05){
+                                ballMoveX = 1;
+                            }
+                            else if((paddle2X-ballX) > 0.05){
+                                ballMoveX = -1;
+                            }
+                            else{
+                                ballMoveX = 0;
+                            }
+                        }
+                    }
+                    //Up AND DOWN Conditions
+                    if(ball.position.x > 2 || ball.position.x < -2){
+                        ballMoveX *= -1;
+                        ball.position.x = Math.round(ball.position.x)
+                    }
+
+                    command.textContent = playerTwoScore + " | " + playerOneScore;
+                    //Moving Paddles
+                    paddle1.position.x += playerOneMove*(0.085);
+                    paddle1.position.x = clamp(paddle1.position.x,-1.85,1.85);
+                    paddle2.position.x += playerTwoMove*(0.085);
+                    paddle2.position.x = clamp(paddle2.position.x,-1.85,1.85);
+                    //Moving Ball
+                    ball.physicsImposter.setLinearVelocity(new BABYLON.Vector3(ballMoveX*5, 0, ballMoveZ*5));
+                }
+                scene.render();
+            });
+        });
+
+        // Resize
+        window.addEventListener("resize", function () {
+            engine.resize();
+        });
+    </script>
+</body>
+
+</html>
